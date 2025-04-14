@@ -109,8 +109,8 @@ server <- function(input, output, session) {
               Mínimo = min(datos_col, na.rm = TRUE),
               Máximo = max(datos_col, na.rm = TRUE),
               Rango = max(datos_col, na.rm = TRUE) - min(datos_col, na.rm = TRUE),
-              Desv. Estándar = sd(datos_col, na.rm = TRUE),
-              Coef. Variación = sd(datos_col, na.rm = TRUE) / mean(datos_col, na.rm = TRUE)
+              Desv_Estándar = sd(datos_col, na.rm = TRUE),
+              Coef_Variación = sd(datos_col, na.rm = TRUE) / mean(datos_col, na.rm = TRUE)
             )
           } else {
             as.data.frame(table(datos_col))
@@ -216,4 +216,4 @@ server <- function(input, output, session) {
   })
 }
 
-shinyApp(ui, server)
+shinyApp(ui,server)
