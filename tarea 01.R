@@ -1,51 +1,62 @@
 # app.R
-paquetes <- c("shiny", "readxl", "dplyr", "ggplot2", "DescTools", "shinythemes")
+paquetes <- c("shiny", "readxl", "dplyr", "ggplot2", "DescTools", "shinythemes", "report")
 instalar_faltantes <- paquetes[!(paquetes %in% installed.packages()[, "Package"])]
 if (length(instalar_faltantes)) install.packages(instalar_faltantes)
 lapply(paquetes, library, character.only = TRUE)
 
 ui <- navbarPage(
-  title = "📊 Análisis Estadístico Interactivo",
-  theme = shinytheme("cerulean"),
+  title = "Análisis Estadístico Interactivo",
+  theme = shinytheme("slate"),
+  tags$head(
+    tags$style(HTML("
+      pre {
+        background-color: #2C3E50 !important;
+        color: #ECF0F1 !important;
+        border: 1px solid #566573;
+        border-radius: 5px;
+        padding: 10px;
+      }
+    "))
+  ),
   
-  tabPanel("📂 Subir Datos",
+  tabPanel("Subir Datos",
            sidebarLayout(
              sidebarPanel(
                fileInput("archivo", "Carga tu archivo (.csv o .xlsx):", accept = c(".csv", ".xlsx")),
                uiOutput("seleccion_vars"),
-               actionButton("analizar", "📊 Analizar", class = "btn btn-success")
+               actionButton("analizar", "Analizar", class = "btn btn-success")
              ),
              mainPanel(
-               h4("📌 Vista previa de los datos"),
+               h4("Vista previa de los datos"),
                tableOutput("vista_datos")
              )
            )
   ),
   
-  tabPanel("📈 Estadísticas & Gráficos",
+  tabPanel("Estadísticas & Gráficos",
            fluidRow(
              column(6,
                     wellPanel(
-                      h4("📐 Estadísticas Descriptivas"),
+                      h4("Estadísticas Descriptivas"),
                       uiOutput("estadisticas_ui")
                     )
              ),
              column(6,
                     wellPanel(
-                      h4("📊 Visualización Gráfica"),
+                      h4("Visualización Gráfica"),
                       uiOutput("graficos_ui")
                     )
              )
            )
   ),
   
-  tabPanel("🧪 Prueba Estadística",
+  tabPanel("Prueba Estadística",
            fluidRow(
              column(12,
                     wellPanel(
-                      h4("📌 Resultado de la prueba"),
+                      h4("Resultado de la prueba"),
                       verbatimTextOutput("resultado_prueba"),
-                      h4("📝 Interpretación"),
+                      h4("Interpretación"),
                       verbatimTextOutput("texto_interpretacion")
                     )
              )
@@ -76,7 +87,7 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$analizar, {
-    updateTabsetPanel(session, "navbarPage", selected = "📈 Estadísticas & Gráficos")
+    updateTabsetPanel(session, "navbarPage", selected = "Estadísticas & Gráficos")
   })
   
   # ESTADÍSTICAS DESCRIPTIVAS
@@ -139,15 +150,30 @@ server <- function(input, output, session) {
           datos_col <- datos()[[v]]
           if (is.numeric(datos_col)) {
             ggplot(data.frame(x = datos_col), aes(x = x)) +
-              geom_histogram(bins = 15, fill = "#2ECC71", color = "white") +
+              geom_histogram(bins = 15, fill = "#5DADE2", color = "white") +
               labs(title = paste("Histograma de", v), x = v, y = "Frecuencia") +
-              theme_minimal()
-          } else {
+              theme_minimal(base_size = 14) +
+              theme(
+                plot.background = element_rect(fill = "#2C3E50", color = NA),
+                panel.background = element_rect(fill = "#2C3E50", color = NA),
+                panel.grid = element_line(color = "#566573"),
+                text = element_text(color = "white"),
+                axis.text = element_text(color = "white"),
+                plot.title = element_text(face = "bold")
+              )
+            } else {
             ggplot(data.frame(x = datos_col), aes(x = x)) +
-              geom_bar(fill = "#E74C3C") +
+              geom_bar(fill = "#A569BD") +
               labs(title = paste("Gráfico de barras de", v), x = v, y = "Frecuencia") +
-              theme_minimal()
-          }
+                theme_minimal(base_size = 14) +
+                theme(
+                  plot.background = element_rect(fill = "#2C3E50", color = NA),
+                  panel.background = element_rect(fill = "#2C3E50", color = NA),
+                  panel.grid = element_line(color = "#566573"),
+                  text = element_text(color = "white"),
+                  axis.text = element_text(color = "white"),
+                  plot.title = element_text(face = "bold")
+                )          }
         })
       })
     }
@@ -195,23 +221,28 @@ server <- function(input, output, session) {
   output$texto_interpretacion <- renderPrint({
     res <- prueba_resultado()
     if (is.null(res)) {
-      return("Sin resultados para interpretar.")
-    }
-    
-    if (inherits(res, "htest")) {
-      p <- res$p.value
-      if (p < 0.05) {
-        cat("✅ p =", round(p, 4), "- Existe diferencia significativa.")
-      } else {
-        cat("ℹ p =", round(p, 4), "- No hay diferencia significativa.")
+      cat("Sin resultados para interpretar.")
+    } else {
+      # Tu interpretación personalizada
+      if (inherits(res, "htest")) {
+        p <- res$p.value
+        if (p < 0.05) {
+          cat("✅ p =", round(p, 4), "- Existe diferencia significativa.\n")
+        } else {
+          cat("ℹ p =", round(p, 4), "- No hay diferencia significativa.\n")
+        }
+      } else if (inherits(res, "aov")) {
+        p <- summary(res)[[1]][["Pr(>F)"]][1]
+        if (p < 0.05) {
+          cat("✅ p =", round(p, 4), "- Al menos un grupo difiere significativamente.\n")
+        } else {
+          cat("ℹ p =", round(p, 4), "- No hay diferencias significativas entre los grupos.\n")
+        }
       }
-    } else if (inherits(res, "aov")) {
-      p <- summary(res)[[1]][["Pr(>F)"]][1]
-      if (p < 0.05) {
-        cat("✅ p =", round(p, 4), "- Al menos un grupo difiere significativamente.")
-      } else {
-        cat("ℹ p =", round(p, 4), "- No hay diferencias significativas entre los grupos.")
-      }
+      
+      # Interpretación automática con report (adicional)
+      cat("\n📋 Interpretación automática:\n")
+      cat(as.character(report::report(res)))
     }
   })
 }
