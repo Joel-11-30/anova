@@ -7,6 +7,7 @@ lapply(paquetes, library, character.only = TRUE)
 ui <- navbarPage(
   title = "Análisis Estadístico Interactivo",
   theme = shinytheme("slate"),
+  id = "navbarPage",
   tags$head(
     tags$style(HTML("
       pre {
@@ -54,6 +55,12 @@ ui <- navbarPage(
            fluidRow(
              column(12,
                     wellPanel(
+                      h4("Opciones de Prueba"),
+                      selectInput("tipo_prueba", "Selecciona la prueba estadística:",
+                                  choices = c("t de Student", "ANOVA", "Wilcoxon",
+                                              "Correlación", "Chi-cuadrado", "McNemar",
+                                              "Kolmogorov-Smirnov", "Shapiro-Wilk", "Jarque-Bera"),
+                                  selected = "t de Student"),
                       h4("Resultado de la prueba"),
                       verbatimTextOutput("resultado_prueba"),
                       h4("Interpretación"),
@@ -82,7 +89,7 @@ server <- function(input, output, session) {
   
   output$seleccion_vars <- renderUI({
     req(datos())
-    selectInput("variables", "Selecciona 2 o más variables:",
+    selectInput("variables", "Selecciona 1 o más variables:",
                 choices = names(datos()), multiple = TRUE)
   })
   
@@ -90,7 +97,6 @@ server <- function(input, output, session) {
     updateTabsetPanel(session, "navbarPage", selected = "Estadísticas & Gráficos")
   })
   
-  # ESTADÍSTICAS DESCRIPTIVAS
   output$estadisticas_ui <- renderUI({
     req(input$variables)
     tablas <- lapply(input$variables, function(var) {
@@ -131,7 +137,6 @@ server <- function(input, output, session) {
     }
   })
   
-  # GRÁFICOS
   output$graficos_ui <- renderUI({
     req(input$variables)
     plots <- lapply(input$variables, function(var) {
@@ -161,52 +166,79 @@ server <- function(input, output, session) {
                 axis.text = element_text(color = "white"),
                 plot.title = element_text(face = "bold")
               )
-            } else {
+          } else {
             ggplot(data.frame(x = datos_col), aes(x = x)) +
               geom_bar(fill = "#A569BD") +
               labs(title = paste("Gráfico de barras de", v), x = v, y = "Frecuencia") +
-                theme_minimal(base_size = 14) +
-                theme(
-                  plot.background = element_rect(fill = "#2C3E50", color = NA),
-                  panel.background = element_rect(fill = "#2C3E50", color = NA),
-                  panel.grid = element_line(color = "#566573"),
-                  text = element_text(color = "white"),
-                  axis.text = element_text(color = "white"),
-                  plot.title = element_text(face = "bold")
-                )          }
+              theme_minimal(base_size = 14) +
+              theme(
+                plot.background = element_rect(fill = "#2C3E50", color = NA),
+                panel.background = element_rect(fill = "#2C3E50", color = NA),
+                panel.grid = element_line(color = "#566573"),
+                text = element_text(color = "white"),
+                axis.text = element_text(color = "white"),
+                plot.title = element_text(face = "bold")
+              )
+          }
         })
       })
     }
   })
   
-  # PRUEBA ESTADÍSTICA
   prueba_resultado <- reactive({
-    req(input$variables)
+    req(input$variables, input$tipo_prueba)
     vars <- input$variables
     df <- datos()
     
-    if (length(vars) == 2) {
-      v1 <- df[[vars[1]]]
-      v2 <- df[[vars[2]]]
-      
-      if (is.numeric(v1) && is.numeric(v2)) {
-        t.test(v1, v2)
-      } else if (!is.numeric(v1) && !is.numeric(v2)) {
-        chisq.test(table(v1, v2))
-      } else {
-        NULL
-      }
-    } else if (length(vars) > 2) {
-      num_vars <- vars[sapply(df[, vars], is.numeric)]
-      if (length(num_vars) >= 2) {
-        formula <- as.formula(paste(num_vars[1], "~", paste(num_vars[-1], collapse = "+")))
-        aov(formula, data = df)
-      } else {
-        NULL
-      }
-    } else {
-      NULL
+    if (length(vars) < 2 && !(input$tipo_prueba %in% c("Shapiro-Wilk", "Jarque-Bera"))) {
+      return(NULL)
     }
+    
+    v1 <- df[[vars[1]]]
+    v2 <- if (length(vars) > 1) df[[vars[2]]] else NULL
+    
+    tryCatch({
+      switch(input$tipo_prueba,
+             "t de Student" = {
+               if (is.numeric(v1) && is.numeric(v2)) t.test(v1, v2) else NULL
+             },
+             "ANOVA" = {
+               num_vars <- vars[sapply(df[, vars], is.numeric)]
+               if (length(num_vars) >= 2) {
+                 formula <- as.formula(paste(num_vars[1], "~", paste(num_vars[-1], collapse = "+")))
+                 aov(formula, data = df)
+               } else NULL
+             },
+             "Wilcoxon" = {
+               if (is.numeric(v1) && is.numeric(v2)) wilcox.test(v1, v2) else NULL
+             },
+             "Correlación" = {
+               if (is.numeric(v1) && is.numeric(v2)) {
+                 n <- min(length(na.omit(v1)), length(na.omit(v2)))
+                 if (n > 30) cor.test(v1, v2, method = "pearson")
+                 else cor.test(v1, v2, method = "spearman")
+               } else NULL
+             },
+             "Chi-cuadrado" = {
+               if (!is.numeric(v1) && !is.numeric(v2)) chisq.test(table(v1, v2)) else NULL
+             },
+             "McNemar" = {
+               if (!is.numeric(v1) && !is.numeric(v2)) mcnemar.test(table(v1, v2)) else NULL
+             },
+             "Kolmogorov-Smirnov" = {
+               if (is.numeric(v1) && is.numeric(v2)) ks.test(v1, v2) else NULL
+             },
+             "Shapiro-Wilk" = {
+               if (is.numeric(v1)) shapiro.test(v1) else NULL
+             },
+             "Jarque-Bera" = {
+               if (is.numeric(v1)) DescTools::JBTest(v1) else NULL
+             },
+             NULL
+      )
+    }, error = function(e) {
+      NULL
+    })
   })
   
   output$resultado_prueba <- renderPrint({
@@ -220,10 +252,13 @@ server <- function(input, output, session) {
   
   output$texto_interpretacion <- renderPrint({
     res <- prueba_resultado()
+    metodo <- input$tipo_prueba
+    
     if (is.null(res)) {
-      cat("Sin resultados para interpretar.")
+      cat("❌ No se pudo realizar la prueba.\n")
     } else {
-      # Tu interpretación personalizada
+      cat("📌 Método utilizado: ", metodo, "\n")
+      
       if (inherits(res, "htest")) {
         p <- res$p.value
         if (p < 0.05) {
@@ -240,11 +275,10 @@ server <- function(input, output, session) {
         }
       }
       
-      # Interpretación automática con report (adicional)
       cat("\n📋 Interpretación automática:\n")
       cat(as.character(report::report(res)))
     }
   })
 }
 
-shinyApp(ui,server)
+shinyApp(ui, server)
