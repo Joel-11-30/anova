@@ -1,4 +1,3 @@
-# app.R
 paquetes <- c("shiny", "readxl", "dplyr", "ggplot2", "DescTools", "shinythemes", "report")
 instalar_faltantes <- paquetes[!(paquetes %in% installed.packages()[, "Package"])]
 if (length(instalar_faltantes)) install.packages(instalar_faltantes)
@@ -57,14 +56,32 @@ ui <- navbarPage(
                     wellPanel(
                       h4("Opciones de Prueba"),
                       selectInput("tipo_prueba", "Selecciona la prueba estadística:",
-                                  choices = c("t de Student", "ANOVA", "Wilcoxon",
-                                              "Correlación", "Chi-cuadrado", "McNemar",
-                                              "Kolmogorov-Smirnov", "Shapiro-Wilk", "Jarque-Bera"),
+                                  choices = c("t de Student", "ANOVA", "Wilcoxon", 
+                                              "Shapiro-Wilk", "Kolmogorov-Smirnov", "Jarque-Bera",
+                                              "Chi-cuadrado", "McNemar", "Correlación", "Límite Central"),
                                   selected = "t de Student"),
-                      h4("Resultado de la prueba"),
-                      verbatimTextOutput("resultado_prueba"),
-                      h4("Interpretación"),
-                      verbatimTextOutput("texto_interpretacion")
+                      uiOutput("opciones_extra"),
+                      conditionalPanel(
+                        condition = "input.tipo_prueba != 'Límite Central'",
+                        tagList(
+                          h4("Resultado de la prueba"),
+                          verbatimTextOutput("resultado_prueba"),
+                          h4("Interpretación"),
+                          verbatimTextOutput("texto_interpretacion")
+                        )
+                      ),
+                      conditionalPanel(
+                        condition = "input.tipo_prueba == 'Límite Central'",
+                        tagList(
+                          h4("Configuración del Teorema del Límite Central"),
+                          selectInput("var_tlc", "Selecciona una variable numérica:", choices = NULL),
+                          numericInput("tamano_muestra", "Tamaño de cada muestra (n):", value = 30, min = 5),
+                          numericInput("numero_muestras", "Número de muestras a tomar:", value = 1000, min = 100),
+                          actionButton("simular_tlc", "Simular", class = "btn btn-primary"),
+                          h4("Distribución de las medias muestrales"),
+                          plotOutput("grafico_tlc")
+                        )
+                      )
                     )
              )
            )
@@ -102,7 +119,6 @@ server <- function(input, output, session) {
     tablas <- lapply(input$variables, function(var) {
       datos_col <- datos()[[var]]
       tipo <- if (is.numeric(datos_col)) "numérica" else "categórica"
-      
       tagList(
         tags$h5(paste("Variable:", var, "-", tipo)),
         tableOutput(paste0("tabla_", var))
@@ -185,8 +201,31 @@ server <- function(input, output, session) {
     }
   })
   
+  output$opciones_extra <- renderUI({
+    req(input$tipo_prueba)
+    if (input$tipo_prueba == "Límite Central") return(NULL)
+    switch(input$tipo_prueba,
+           "t de Student" = tagList(
+             radioButtons("var_ttest", "Tipo de prueba t:",
+                          choices = c("Independientes" = "ind", "Pareadas" = "par"),
+                          selected = "ind")
+           ),
+           "Wilcoxon" = tagList(
+             checkboxInput("wilcoxon_pareado", "¿Pareadas?", value = FALSE),
+             checkboxInput("wilcoxon_alternativa", "¿Alternativa diferente de dos colas?", value = FALSE)
+           ),
+           "Correlación" = tagList(
+             selectInput("tipo_cor", "Tipo de correlación:",
+                         choices = c("Pearson", "Spearman", "Kendall"), selected = "Pearson")
+           ),
+           NULL
+    )
+  })
+  
   prueba_resultado <- reactive({
     req(input$variables, input$tipo_prueba)
+    if (input$tipo_prueba == "Límite Central") return(NULL)
+    
     vars <- input$variables
     df <- datos()
     
@@ -200,7 +239,10 @@ server <- function(input, output, session) {
     tryCatch({
       switch(input$tipo_prueba,
              "t de Student" = {
-               if (is.numeric(v1) && is.numeric(v2)) t.test(v1, v2) else NULL
+               if (is.numeric(v1) && is.numeric(v2)) {
+                 paired <- input$var_ttest == "par"
+                 t.test(v1, v2, paired = paired)
+               } else NULL
              },
              "ANOVA" = {
                num_vars <- vars[sapply(df[, vars], is.numeric)]
@@ -210,13 +252,14 @@ server <- function(input, output, session) {
                } else NULL
              },
              "Wilcoxon" = {
-               if (is.numeric(v1) && is.numeric(v2)) wilcox.test(v1, v2) else NULL
+               if (is.numeric(v1) && is.numeric(v2)) {
+                 wilcox.test(v1, v2, paired = input$wilcoxon_pareado,
+                             alternative = if (input$wilcoxon_alternativa) "greater" else "two.sided")
+               } else NULL
              },
              "Correlación" = {
                if (is.numeric(v1) && is.numeric(v2)) {
-                 n <- min(length(na.omit(v1)), length(na.omit(v2)))
-                 if (n > 30) cor.test(v1, v2, method = "pearson")
-                 else cor.test(v1, v2, method = "spearman")
+                 cor.test(v1, v2, method = tolower(input$tipo_cor))
                } else NULL
              },
              "Chi-cuadrado" = {
@@ -279,6 +322,36 @@ server <- function(input, output, session) {
       cat(as.character(report::report(res)))
     }
   })
+  
+  observe({
+    req(datos())
+    updateSelectInput(session, "var_tlc", choices = names(datos())[sapply(datos(), is.numeric)])
+  })
+  
+  observeEvent(input$simular_tlc, {
+    req(input$var_tlc, input$tamano_muestra, input$numero_muestras)
+    df <- datos()
+    variable <- df[[input$var_tlc]]
+    medias <- replicate(input$numero_muestras, {
+      mean(sample(variable, size = input$tamano_muestra, replace = TRUE))
+    })
+    output$grafico_tlc <- renderPlot({
+      ggplot(data.frame(media = medias), aes(x = media)) +
+        geom_histogram(bins = 30, fill = "#F39C12", color = "black") +
+        labs(title = "Distribución de las Medias Muestrales", x = "Media", y = "Frecuencia") +
+        theme_minimal(base_size = 14) +
+        theme(
+          plot.background = element_rect(fill = "#2C3E50", color = NA),
+          panel.background = element_rect(fill = "#2C3E50", color = NA),
+          panel.grid = element_line(color = "#566573"),
+          text = element_text(color = "white"),
+          axis.text = element_text(color = "white"),
+          plot.title = element_text(face = "bold")
+        )
+    })
+  })
 }
 
 shinyApp(ui, server)
+
+  
